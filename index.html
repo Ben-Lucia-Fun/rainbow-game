@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Star Collector - Original Game 1</title>
+  <style>
+    /* Simple, bright styling for kids */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      font-family: 'Comic Sans MS', 'Chalkboard', sans-serif;
+    }
+    h1 {
+      color: #fff;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+      margin-bottom: 10px;
+    }
+    #scoreDisplay {
+      font-size: 24px;
+      color: #ffeb3b;
+      margin-bottom: 10px;
+      text-shadow: 1px 1px 2px #000;
+    }
+    canvas {
+      background: #1a1a2e;
+      border: 4px solid #ffeb3b;
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      display: block;
+    }
+    #restartBtn {
+      display: none;
+      margin-top: 20px;
+      padding: 15px 40px;
+      font-size: 22px;
+      font-family: inherit;
+      background: #4caf50;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    #restartBtn:hover {
+      background: #66bb6a;
+      transform: scale(1.05);
+    }
+    p {
+      color: rgba(255,255,255,0.9);
+      margin-top: 10px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>⭐ Star Collector ⭐</h1>
+  <div id="scoreDisplay">Stars: 0 / 10</div>
+  <canvas id="gameCanvas" width="600" height="400"></canvas>
+  <button id="restartBtn">Play Again!</button>
+  <p>Use the arrow keys to move. Collect 10 stars to win!</p>
+
+  <script>
+    // ========== GET CANVAS AND CONTEXT ==========
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // ========== GAME SETTINGS ==========
+    const WIN_SCORE = 10;
+    const PLAYER_SPEED = 5;
+    const PLAYER_RADIUS = 25;
+    const STAR_RADIUS = 18;
+
+    // Rainbow colors for drawing stars (ROYGBIV - just the look)
+    const RAINBOW_COLORS = ['#e53935', '#ff9800', '#ffeb3b', '#4caf50', '#2196f3', '#3f51b5', '#9c27b0'];
+
+    // ========== GAME STATE ==========
+    let score = 0;
+    let gameWon = false;
+
+    // Player position (center of circle)
+    let player = {
+      x: canvas.width / 2,
+      y: canvas.height / 2
+    };
+
+    // Which keys are currently held down
+    let keys = {
+      ArrowUp: false,
+      ArrowDown: false,
+      ArrowLeft: false,
+      ArrowRight: false
+    };
+
+    // Star positions - we'll create random positions
+    let stars = [];
+
+    // ========== CREATE STARS (random positions on the canvas) ==========
+    function createStars() {
+      stars = [];
+      for (let i = 0; i < WIN_SCORE; i++) {
+        stars.push({
+          x: STAR_RADIUS + Math.random() * (canvas.width - STAR_RADIUS * 2),
+          y: STAR_RADIUS + Math.random() * (canvas.height - STAR_RADIUS * 2),
+          collected: false
+        });
+      }
+    }
+
+    // ========== PLAY COLLECT SOUND (using Web Audio - no external file) ==========
+    function playCollectSound() {
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        oscillator.frequency.value = 880;
+        oscillator.type = 'sine';
+        gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+        oscillator.start(audioCtx.currentTime);
+        oscillator.stop(audioCtx.currentTime + 0.15);
+      } catch (e) {
+        // If sound fails, game still works
+      }
+    }
+
+    // ========== PLAY WIN CELEBRATION (Hooray Sound.m4a clip only) ==========
+    function playWinCelebration() {
+      try {
+        const hooray = new Audio('Hooray Sound.m4a');
+        hooray.volume = 1;
+        hooray.play().catch(function() {});
+      } catch (e) {
+        // If sound fails, game still works
+      }
+    }
+
+    // ========== KEYBOARD LISTENERS ==========
+    document.addEventListener('keydown', function(e) {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault();
+        keys[e.key] = true;
+      }
+    });
+    document.addEventListener('keyup', function(e) {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        keys[e.key] = false;
+      }
+    });
+
+    // ========== MOVE PLAYER ==========
+    function updatePlayer() {
+      if (keys.ArrowUp)    player.y -= PLAYER_SPEED;
+      if (keys.ArrowDown)  player.y += PLAYER_SPEED;
+      if (keys.ArrowLeft)  player.x -= PLAYER_SPEED;
+      if (keys.ArrowRight) player.x += PLAYER_SPEED;
+
+      // Keep player inside the canvas
+      player.x = Math.max(PLAYER_RADIUS, Math.min(canvas.width - PLAYER_RADIUS, player.x));
+      player.y = Math.max(PLAYER_RADIUS, Math.min(canvas.height - PLAYER_RADIUS, player.y));
+    }
+
+    // ========== CHECK IF PLAYER TOUCHES A STAR ==========
+    function checkStarCollision() {
+      for (let i = 0; i < stars.length; i++) {
+        if (stars[i].collected) continue;
+        const dx = player.x - stars[i].x;
+        const dy = player.y - stars[i].y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < PLAYER_RADIUS + STAR_RADIUS) {
+          stars[i].collected = true;
+          score++;
+          playCollectSound();
+          if (score >= WIN_SCORE) {
+            gameWon = true;
+            document.getElementById('restartBtn').style.display = 'block';
+            playWinCelebration();
+          }
+        }
+      }
+    }
+
+    // ========== DRAW EVERYTHING ==========
+    function draw() {
+      // Clear the canvas (dark background)
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Draw stars (rainbow look only - arch shape, drawn at s.x/s.y so we never change ctx transform)
+      for (let i = 0; i < stars.length; i++) {
+        if (stars[i].collected) continue;
+        const s = stars[i];
+        const bandWidth = STAR_RADIUS / RAINBOW_COLORS.length;
+        for (let k = 0; k < RAINBOW_COLORS.length; k++) {
+          const outerR = STAR_RADIUS - k * bandWidth;
+          const innerR = Math.max(0, outerR - bandWidth);
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, outerR, Math.PI, 0, false);
+          ctx.arc(s.x, s.y, innerR, 0, Math.PI, true);
+          ctx.closePath();
+          ctx.fillStyle = RAINBOW_COLORS[k];
+          ctx.fill();
+        }
+      }
+
+      // Draw player (unicorn to match reference: light purple, voluminous rainbow mane, spiral horn same color as body)
+      const px = player.x;
+      const py = player.y;
+      const lav = '#d8bfd8';
+      const lavLight = '#e6e6fa';
+      const lavOutline = '#b19cd9';
+      const earPink = '#ffb6c1';
+      const muzzleWhite = '#f8f4ff';
+      const chestWhite = '#ffffff';
+      const eyeBlue = '#87ceeb';
+      const eyePupil = '#2f4f6f';
+      // Body (soft light lavender, rounded)
+      ctx.beginPath();
+      ctx.ellipse(px - 4, py, 15, 19, 0, 0, Math.PI * 2);
+      ctx.fillStyle = lav;
+      ctx.fill();
+      ctx.strokeStyle = lavOutline;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // White chest and belly patch (lighter furry patch)
+      ctx.beginPath();
+      ctx.ellipse(px - 10, py + 5, 11, 14, 0.35, 0, Math.PI * 2);
+      ctx.fillStyle = chestWhite;
+      ctx.fill();
+      // Legs: light purple with fluffy white tufts at fetlocks, lavender hooves
+      ctx.beginPath();
+      ctx.ellipse(px - 14, py + 16, 6, 11, 0.25, 0, Math.PI * 2);
+      ctx.fillStyle = lav;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(px - 14, py + 24, 5, 6, 0.25, 0, Math.PI * 2);
+      ctx.fillStyle = chestWhite;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(px - 14, py + 28, 4, 4, 0.25, 0, Math.PI * 2);
+      ctx.fillStyle = lav;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(px + 4, py + 16, 6, 11, -0.2, 0, Math.PI * 2);
+      ctx.fillStyle = lav;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(px + 4, py + 24, 5, 6, -0.2, 0, Math.PI * 2);
+      ctx.fillStyle = chestWhite;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(px + 4, py + 28, 4, 4, -0.2, 0, Math.PI * 2);
+      ctx.fillStyle = lav;
+      ctx.fill();
+      // Head (light lavender, rounded friendly shape)
+      ctx.beginPath();
+      ctx.arc(px + 13, py - 1, 13, 0, Math.PI * 2);
+      ctx.fillStyle = lav;
+      ctx.fill();
+      ctx.strokeStyle = lavOutline;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Muzzle (lighter purple/off-white)
+      ctx.beginPath();
+      ctx.ellipse(px + 20, py + 3, 7, 6, 0, 0, Math.PI * 2);
+      ctx.fillStyle = muzzleWhite;
+      ctx.fill();
+      // Ears: pointed, purple with pink inner
+      ctx.beginPath();
+      ctx.moveTo(px + 5, py - 11);
+      ctx.lineTo(px + 12, py - 22);
+      ctx.lineTo(px + 19, py - 11);
+      ctx.closePath();
+      ctx.fillStyle = lav;
+      ctx.fill();
+      ctx.strokeStyle = lavOutline;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(px + 9, py - 12);
+      ctx.lineTo(px + 12, py - 18);
+      ctx.lineTo(px + 15, py - 12);
+      ctx.closePath();
+      ctx.fillStyle = earPink;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(px + 15, py - 13);
+      ctx.lineTo(px + 19, py - 25);
+      ctx.lineTo(px + 25, py - 13);
+      ctx.closePath();
+      ctx.fillStyle = lav;
+      ctx.fill();
+      ctx.strokeStyle = lavOutline;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(px + 17, py - 14);
+      ctx.lineTo(px + 19, py - 20);
+      ctx.lineTo(px + 21, py - 14);
+      ctx.closePath();
+      ctx.fillStyle = earPink;
+      ctx.fill();
+      // Horn: same light purple as body, pointed, spiraled
+      ctx.beginPath();
+      ctx.moveTo(px + 13, py - 14);
+      ctx.lineTo(px + 11, py - 30);
+      ctx.lineTo(px + 15, py - 14);
+      ctx.closePath();
+      ctx.fillStyle = lav;
+      ctx.fill();
+      ctx.strokeStyle = lavOutline;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(px + 11.5, py - 19);
+      ctx.lineTo(px + 13.5, py - 24);
+      ctx.strokeStyle = lavLight;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(px + 12, py - 25);
+      ctx.lineTo(px + 13, py - 29);
+      ctx.stroke();
+      // Voluminous rainbow mane: distinct stripes (light blue, teal, green, yellow, orange, pink/purple) - wavy strands
+      const maneStripes = ['#add8e6', '#40e0d0', '#98fb98', '#ffef00', '#ffa500', '#ffb6c1', '#dda0dd'];
+      for (let m = 0; m < 7; m++) {
+        ctx.beginPath();
+        const wave = Math.sin(m * 0.8) * 4;
+        ctx.moveTo(px + 6 - m * 1.5, py - 4 - m);
+        ctx.quadraticCurveTo(px - 8 + wave - m * 2, py - 18 - m * 2, px + 4, py - 2 - m);
+        ctx.strokeStyle = maneStripes[m];
+        ctx.lineWidth = 4;
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.moveTo(px + 8, py - 12);
+      ctx.quadraticCurveTo(px - 6, py - 28, px + 6, py - 10);
+      ctx.strokeStyle = '#b0c4de';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(px + 10, py - 14);
+      ctx.quadraticCurveTo(px - 10, py - 32, px + 8, py - 12);
+      ctx.strokeStyle = '#e0b0ff';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      // Large blue eye with black lashes and white sparkle
+      ctx.beginPath();
+      ctx.ellipse(px + 18, py - 2, 5, 6, 0, 0, Math.PI * 2);
+      ctx.fillStyle = eyeBlue;
+      ctx.fill();
+      ctx.strokeStyle = '#5a9fb8';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(px + 19, py - 3, 2, 0, Math.PI * 2);
+      ctx.fillStyle = eyePupil;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(px + 19.5, py - 3.8, 1, 0, Math.PI * 2);
+      ctx.fillStyle = chestWhite;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(px + 15, py - 6);
+      ctx.lineTo(px + 13.5, py - 9);
+      ctx.moveTo(px + 17, py - 6.5);
+      ctx.lineTo(px + 16, py - 10);
+      ctx.moveTo(px + 19, py - 6);
+      ctx.lineTo(px + 20, py - 9.5);
+      ctx.moveTo(px + 21, py - 5);
+      ctx.lineTo(px + 23, py - 8);
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      // Gentle closed-mouth smile
+      ctx.beginPath();
+      ctx.arc(px + 20, py + 4, 2.5, 0.15 * Math.PI, 0.85 * Math.PI);
+      ctx.strokeStyle = '#e8a0a0';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Cutie mark: three butterflies - two vibrant yellow-orange, one light blue/teal
+      ctx.beginPath();
+      ctx.ellipse(px - 16, py + 1, 3.5, 2.5, 0.4, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffb347';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(px - 13, py - 1, 3, 2.2, -0.2, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffb347';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(px - 10, py + 2, 3, 2.2, 0.3, 0, Math.PI * 2);
+      ctx.fillStyle = '#7fffd4';
+      ctx.fill();
+
+      // Draw "YOU WIN!" message when game is won
+      if (gameWon) {
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ffeb3b';
+        ctx.font = 'bold 48px "Comic Sans MS", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('YOU WIN! 🎉', canvas.width / 2, canvas.height / 2);
+      }
+    }
+
+    // ========== UPDATE SCORE DISPLAY ==========
+    function updateScoreDisplay() {
+      document.getElementById('scoreDisplay').textContent = 'Stars: ' + score + ' / ' + WIN_SCORE;
+    }
+
+    // ========== MAIN GAME LOOP ==========
+    function gameLoop() {
+      if (!gameWon) {
+        updatePlayer();
+        checkStarCollision();
+        updateScoreDisplay();
+      }
+      draw();
+      requestAnimationFrame(gameLoop);
+    }
+
+    // ========== RESTART GAME ==========
+    function restartGame() {
+      score = 0;
+      gameWon = false;
+      player.x = canvas.width / 2;
+      player.y = canvas.height / 2;
+      document.getElementById('restartBtn').style.display = 'none';
+      createStars();
+      updateScoreDisplay();
+    }
+
+    document.getElementById('restartBtn').addEventListener('click', restartGame);
+
+    // ========== START THE GAME ==========
+    createStars();
+    gameLoop();
+  </script>
+</body>
+</html>
